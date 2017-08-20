@@ -6,6 +6,7 @@
 
 #include "extractor/compressed_edge_container.hpp"
 #include "extractor/edge_based_graph_factory.hpp"
+#include "extractor/files.hpp"
 #include "extractor/node_based_edge.hpp"
 
 #include "storage/io.hpp"
@@ -34,6 +35,26 @@ namespace osrm
 {
 namespace contractor
 {
+
+std::vector<bool> ComputeCore(const ContractorConfig &config, std::size_t number_of_nodes)
+{
+    extractor::EdgeBasedNodeDataContainer node_data;
+    extractor::files::readNodeData(config.GetPath(".osrm.ebg_nodes"), node_data);
+
+    extractor::ProfileProperties properties;
+    extractor::files::readProfileProperties(config.GetPath(".osrm.properties"), properties);
+
+    std::vector<bool> core(number_of_nodes, false);
+    for (const auto mask : properties.excludable_classes)
+    {
+        for (const auto node : util::irange<NodeID>(0, number_of_nodes))
+        {
+            core[node] = core[node] || (node_data.GetClassData(node) & mask) > 0;
+        }
+    }
+
+    return core;
+}
 
 int Contractor::Run()
 {
@@ -72,11 +93,33 @@ int Contractor::Run()
 
     util::DeallocatingVector<QueryEdge> contracted_edge_list;
     { // own scope to not keep the contractor around
-        auto contractor_graph = toContractorGraph(max_edge_id+1, std::move(edge_based_edge_list));
+        auto contractor_graph = toContractorGraph(max_edge_id + 1, std::move(edge_based_edge_list));
+
+        auto core = ComputeCore(config, contractor_graph.GetNumberOfNodes());
+        std::vector<bool> not_core(core.size());
+        std::transform(core.begin(), core.end(), not_core.begin(), [](const bool is_core) {
+            return !is_core;
+        });
+
+        // By not contracting all contractable nodes we avoid creating
+        // a very dense core. This increases the overall graph sizes a little bit
+        // but increases the final CH quality and contraction speed.
+        constexpr float BASE_CORE = 0.9;
+        std::vector<bool> overall_core;
+        std::tie(std::ignore, overall_core) = contractGraph(
+            contractor_graph, std::move(not_core), std::move(node_levels), node_weights, BASE_CORE);
+
         std::tie(node_levels, is_core_node) = contractGraph(contractor_graph,
-                                         std::move(node_levels),
-                                         std::move(node_weights),
-                                         config.core_factor);
+                                                            std::move(overall_core),
+                                                            std::move(node_levels),
+                                                            std::move(node_weights),
+                                                            config.core_factor);
+
+        // Don't save the core for non-CoreCh
+        if (config.core_factor == 1.0)
+            is_core_node.clear();
+
+        util::Log() << "Contracted graph has " << contractor_graph.GetNumberOfEdges() << " edges.";
 
         contracted_edge_list = toEdges<QueryEdge>(std::move(contractor_graph));
     }

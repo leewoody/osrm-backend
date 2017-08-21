@@ -226,7 +226,7 @@ void Sol2ScriptingEnvironment::InitContext(LuaScriptingContext &context)
                                                 "interpolate",
                                                 &RasterContainer::GetRasterInterpolateFromSource);
 
-    auto registration_ProfileProperties = context.state.new_usertype<ProfileProperties>(
+    context.state.new_usertype<ProfileProperties>(
         "ProfileProperties",
         "traffic_signal_penalty",
         sol::property(&ProfileProperties::GetTrafficSignalPenalty,
@@ -538,7 +538,6 @@ void Sol2ScriptingEnvironment::InitContext(LuaScriptingContext &context)
             if (use_turn_restrictions != sol::nullopt)
                 context.properties.use_turn_restrictions = use_turn_restrictions.value();
 
-            // DEPRECATED: global left_hand_driving will be removed in the next profile API
             sol::optional<bool> left_hand_driving = properties["left_hand_driving"];
             if (left_hand_driving != sol::nullopt)
                 context.properties.left_hand_driving = left_hand_driving.value();

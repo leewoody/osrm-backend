@@ -22,6 +22,7 @@
 #include "util/string_util.hpp"
 #include "util/timing_util.hpp"
 #include "util/typedefs.hpp"
+#include "util/exclude_flag.hpp"
 
 #include <algorithm>
 #include <bitset>
@@ -35,26 +36,6 @@ namespace osrm
 {
 namespace contractor
 {
-
-std::vector<bool> ComputeCore(const ContractorConfig &config, std::size_t number_of_nodes)
-{
-    extractor::EdgeBasedNodeDataContainer node_data;
-    extractor::files::readNodeData(config.GetPath(".osrm.ebg_nodes"), node_data);
-
-    extractor::ProfileProperties properties;
-    extractor::files::readProfileProperties(config.GetPath(".osrm.properties"), properties);
-
-    std::vector<bool> core(number_of_nodes, false);
-    for (const auto mask : properties.excludable_classes)
-    {
-        for (const auto node : util::irange<NodeID>(0, number_of_nodes))
-        {
-            core[node] = core[node] || (node_data.GetClassData(node) & mask) > 0;
-        }
-    }
-
-    return core;
-}
 
 int Contractor::Run()
 {
@@ -91,33 +72,50 @@ int Contractor::Run()
         files::readLevels(config.GetPath(".osrm.level"), node_levels);
     }
 
+    std::vector<std::vector<bool>> filters;
+    {
+        extractor::EdgeBasedNodeDataContainer node_data;
+        extractor::files::readNodeData(config.GetPath(".osrm.ebg_nodes"), node_data);
+
+        extractor::ProfileProperties properties;
+        extractor::files::readProfileProperties(config.GetPath(".osrm.properties"), properties);
+
+        filters = util::excludeFlagsToNodeFilter(max_edge_id+1, node_data, properties);
+    }
+
     util::DeallocatingVector<QueryEdge> contracted_edge_list;
     { // own scope to not keep the contractor around
         auto contractor_graph = toContractorGraph(max_edge_id + 1, std::move(edge_based_edge_list));
-
-        auto core = ComputeCore(config, contractor_graph.GetNumberOfNodes());
-        std::vector<bool> not_core(core.size());
-        std::transform(core.begin(), core.end(), not_core.begin(), [](const bool is_core) {
-            return !is_core;
-        });
+        std::vector<bool> always_allowed(max_edge_id + 1, true);
+        for (const auto &filter : filters)
+        {
+            for (const auto node : util::irange<NodeID>(0, max_edge_id+1))
+            {
+                always_allowed[node] = always_allowed[node] && filter[node];
+            }
+        }
 
         // By not contracting all contractable nodes we avoid creating
         // a very dense core. This increases the overall graph sizes a little bit
         // but increases the final CH quality and contraction speed.
         constexpr float BASE_CORE = 0.9;
-        std::vector<bool> overall_core;
-        std::tie(std::ignore, overall_core) = contractGraph(
-            contractor_graph, std::move(not_core), std::move(node_levels), node_weights, BASE_CORE);
+        std::vector<bool> shared_core;
+        std::tie(std::ignore, shared_core) = contractGraph(contractor_graph,
+                                                           std::move(always_allowed),
+                                                           node_levels,
+                                                           node_weights,
+                                                           BASE_CORE);
 
-        std::tie(node_levels, is_core_node) = contractGraph(contractor_graph,
-                                                            std::move(overall_core),
-                                                            std::move(node_levels),
-                                                            std::move(node_weights),
-                                                            config.core_factor);
+        for (const auto &filter : filters)
+        {
+            auto filtered_graph = contractor_graph;
 
-        // Don't save the core for non-CoreCh
-        if (config.core_factor == 1.0)
-            is_core_node.clear();
+            contractGraph(filtered_graph,
+                          shared_core,
+                          node_levels,
+                          node_weights,
+                          config.core_factor);
+        }
 
         util::Log() << "Contracted graph has " << contractor_graph.GetNumberOfEdges() << " edges.";
 

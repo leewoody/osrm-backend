@@ -33,6 +33,29 @@ template <typename EdgeDataT, bool UseSharedMemory>
 void write(storage::io::FileWriter &writer, const DynamicGraph<EdgeDataT> &graph);
 }
 
+namespace detail
+{
+    // These types need to live outside of DynamicGraph
+    // to be not dependable. We need this for transforming graphs
+    // with different data.
+
+    template<typename EdgeIterator>
+    struct DynamicNode
+    {
+        // index of the first edge
+        EdgeIterator first_edge;
+        // amount of edges
+        unsigned edges;
+    };
+
+    template<typename NodeIterator, typename EdgeDataT>
+    struct DynamicEdge
+    {
+        NodeIterator target;
+        EdgeDataT data;
+    };
+}
+
 template <typename EdgeDataT> class DynamicGraph
 {
   public:
@@ -40,6 +63,11 @@ template <typename EdgeDataT> class DynamicGraph
     using NodeIterator = std::uint32_t;
     using EdgeIterator = std::uint32_t;
     using EdgeRange = range<EdgeIterator>;
+
+    using Node = detail::DynamicNode<EdgeIterator>;
+    using Edge = detail::DynamicEdge<NodeIterator, EdgeDataT>;
+
+    template<typename E> friend class DynamicGraph;
 
     class InputEdge
     {
@@ -120,6 +148,9 @@ template <typename EdgeDataT> class DynamicGraph
         }
     }
 
+    // Copy&move for the same data
+    //
+
     DynamicGraph(const DynamicGraph &other)
     {
         number_of_nodes = other.number_of_nodes;
@@ -130,7 +161,7 @@ template <typename EdgeDataT> class DynamicGraph
         edge_list = other.edge_list;
     }
 
-    DynamicGraph&operator=(const DynamicGraph &other)
+    DynamicGraph &operator=(const DynamicGraph &other)
     {
         auto copy_other = other;
         *this = std::move(other);
@@ -158,6 +189,44 @@ template <typename EdgeDataT> class DynamicGraph
 
         return *this;
     }
+
+    template <typename OtherEdgeDataT>
+    auto Transform() const &
+    {
+        DynamicGraph<OtherEdgeDataT> other;
+
+        other.number_of_nodes = number_of_nodes;
+        other.number_of_edges = static_cast<std::uint32_t>(number_of_edges);
+        other.node_array = node_array;
+        other.edge_list.resize(edge_list.size());
+        std::transform(edge_list.begin(),
+                       edge_list.end(),
+                       other.edge_list.begin(),
+                       [](const auto &edge_entry) {
+                           return detail::DynamicEdge<NodeIterator, OtherEdgeDataT>{edge_entry.target, OtherEdgeDataT{edge_entry.data}};
+                       });
+
+        return other;
+    }
+
+    template <typename OtherEdgeDataT>
+    auto Transform() &&
+    {
+        DynamicGraph<OtherEdgeDataT> other;
+        other.number_of_nodes = number_of_nodes;
+        other.number_of_edges = static_cast<std::uint32_t>(number_of_edges);
+        other.node_array = std::move(node_array);
+        other.edge_list.resize(edge_list.size());
+        std::transform(std::make_move_iterator(edge_list.begin()),
+                       std::make_move_iterator(edge_list.end()),
+                       other.edge_list.begin(),
+                       [](auto &&edge_entry) {
+                           return detail::DynamicEdge<NodeIterator, OtherEdgeDataT>{edge_entry.target, OtherEdgeDataT{std::move(edge_entry.data)}};
+                       });
+
+        return other;
+    }
+
 
     unsigned GetNumberOfNodes() const { return number_of_nodes; }
 
@@ -399,20 +468,6 @@ template <typename EdgeDataT> class DynamicGraph
     {
         edge_list[edge].target = (std::numeric_limits<NodeIterator>::max)();
     }
-
-    struct Node
-    {
-        // index of the first edge
-        EdgeIterator first_edge;
-        // amount of edges
-        unsigned edges;
-    };
-
-    struct Edge
-    {
-        NodeIterator target;
-        EdgeDataT data;
-    };
 
     NodeIterator number_of_nodes;
     std::atomic_uint number_of_edges;

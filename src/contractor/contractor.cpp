@@ -23,6 +23,7 @@
 #include "util/timing_util.hpp"
 #include "util/typedefs.hpp"
 #include "util/exclude_flag.hpp"
+#include "util/filtered_graph.hpp"
 
 #include <algorithm>
 #include <bitset>
@@ -108,13 +109,16 @@ int Contractor::Run()
 
         for (const auto &filter : filters)
         {
-            auto filtered_graph = contractor_graph;
+            util::FilteredGraphContainer<ContractorGraph> filtered_graph {contractor_graph, [&filter](const NodeID node) {
+                return filter[node];
+            }};
 
-            contractGraph(filtered_graph,
-                          shared_core,
-                          node_levels,
-                          node_weights,
-                          config.core_factor);
+            // FIXME we need a specialization for this
+            //contractGraph(filtered_graph,
+            //              shared_core,
+            //              node_levels,
+            //              node_weights,
+            //              config.core_factor);
         }
 
         util::Log() << "Contracted graph has " << contractor_graph.GetNumberOfEdges() << " edges.";

@@ -1,5 +1,5 @@
 #include "contractor/graph_contractor.hpp"
-#include "contractor/contractor_dijkstra.hpp"
+#include "contractor/contractor_search.hpp"
 #include "contractor/contractor_graph.hpp"
 #include "contractor/query_edge.hpp"
 #include "util/deallocating_vector.hpp"
@@ -29,10 +29,10 @@ namespace
 {
 struct ContractorThreadData
 {
-    ContractorDijkstra dijkstra;
+    ContractorHeap heap;
     std::vector<ContractorEdge> inserted_edges;
     std::vector<NodeID> neighbours;
-    explicit ContractorThreadData(NodeID nodes) : dijkstra(nodes) {}
+    explicit ContractorThreadData(NodeID nodes) : heap(nodes) {}
 };
 
 struct ContractorNodeData
@@ -146,7 +146,7 @@ void ContractNode(ContractorThreadData *data,
                   std::vector<EdgeWeight> &node_weights,
                   ContractionStats *stats = nullptr)
 {
-    auto &dijkstra = data->dijkstra;
+    auto &heap = data->heap;
     std::size_t inserted_edges_size = data->inserted_edges.size();
     std::vector<ContractorEdge> &inserted_edges = data->inserted_edges;
     constexpr bool SHORTCUT_ARC = true;
@@ -173,8 +173,8 @@ void ContractNode(ContractorThreadData *data,
             continue;
         }
 
-        dijkstra.Clear();
-        dijkstra.Insert(source, 0, ContractorHeapData{});
+        heap.Clear();
+        heap.Insert(source, 0, ContractorHeapData{});
         EdgeWeight max_weight = 0;
         unsigned number_of_targets = 0;
 
@@ -239,9 +239,9 @@ void ContractNode(ContractorThreadData *data,
                 continue;
             }
             max_weight = std::max(max_weight, path_weight);
-            if (!dijkstra.WasInserted(target))
+            if (!heap.WasInserted(target))
             {
-                dijkstra.Insert(target, INVALID_EDGE_WEIGHT, ContractorHeapData{0, true});
+                heap.Insert(target, INVALID_EDGE_WEIGHT, ContractorHeapData{0, true});
                 ++number_of_targets;
             }
         }
@@ -249,12 +249,12 @@ void ContractNode(ContractorThreadData *data,
         if (RUNSIMULATION)
         {
             const int constexpr SIMULATION_SEARCH_SPACE_SIZE = 1000;
-            dijkstra.Run(number_of_targets, SIMULATION_SEARCH_SPACE_SIZE, max_weight, node, graph);
+            search(heap, graph, number_of_targets, SIMULATION_SEARCH_SPACE_SIZE, max_weight, node);
         }
         else
         {
             const int constexpr FULL_SEARCH_SPACE_SIZE = 2000;
-            dijkstra.Run(number_of_targets, FULL_SEARCH_SPACE_SIZE, max_weight, node, graph);
+            search(heap, graph, number_of_targets, FULL_SEARCH_SPACE_SIZE, max_weight, node);
         }
         for (auto out_edge : graph.GetAdjacentEdgeRange(node))
         {
@@ -268,7 +268,7 @@ void ContractNode(ContractorThreadData *data,
                 continue;
 
             const EdgeWeight path_weight = in_data.weight + out_data.weight;
-            const EdgeWeight weight = dijkstra.GetKey(target);
+            const EdgeWeight weight = heap.GetKey(target);
             if (path_weight < weight)
             {
                 if (RUNSIMULATION)

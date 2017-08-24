@@ -139,9 +139,9 @@ inline bool Bias(const util::XORFastHash<> &fast_hash, const NodeID a, const Nod
     return a < b;
 }
 
-template <bool RUNSIMULATION>
+template <bool RUNSIMULATION, typename GraphT>
 void ContractNode(ContractorThreadData *data,
-                  const ContractorGraph &graph,
+                  const GraphT &graph,
                   const NodeID node,
                   std::vector<EdgeWeight> &node_weights,
                   ContractionStats *stats = nullptr)
@@ -343,16 +343,18 @@ void ContractNode(ContractorThreadData *data,
     }
 }
 
+template<typename GraphT>
 void ContractNode(ContractorThreadData *data,
-                  const ContractorGraph &graph,
+                  const GraphT &graph,
                   const NodeID node,
                   std::vector<EdgeWeight> &node_weights)
 {
     ContractNode<false>(data, graph, node, node_weights, nullptr);
 }
 
+template<typename GraphT>
 ContractionStats SimulateNodeContraction(ContractorThreadData *data,
-                                         const ContractorGraph &graph,
+                                         const GraphT &graph,
                                          const NodeID node,
                                          std::vector<EdgeWeight> &node_weights)
 {
@@ -361,7 +363,9 @@ ContractionStats SimulateNodeContraction(ContractorThreadData *data,
     return stats;
 }
 
-void RenumberGraph(ContractorGraph &graph, const std::vector<NodeID> &old_to_new)
+
+template<typename GraphT>
+void RenumberGraph(GraphT &graph, const std::vector<NodeID> &old_to_new)
 {
     graph.Renumber(old_to_new);
     // Renumber all shortcut node IDs
@@ -379,10 +383,11 @@ void RenumberGraph(ContractorGraph &graph, const std::vector<NodeID> &old_to_new
 }
 
 /* Reorder nodes for better locality during contraction */
+template<typename GraphT>
 void RenumberData(std::vector<RemainingNodeData> &remaining_nodes,
                    std::vector<NodeID> &new_to_old_node_id,
                    ContractorNodeData &node_data,
-                   ContractorGraph &graph)
+                   GraphT &graph)
 {
     std::vector<NodeID> current_to_new_node_id(graph.GetNumberOfNodes(), SPECIAL_NODEID);
 
@@ -436,7 +441,8 @@ float EvaluateNodePriority(const ContractionStats &stats,
     return result;
 }
 
-void DeleteIncomingEdges(ContractorThreadData *data, ContractorGraph &graph, const NodeID node)
+template<typename GraphT>
+void DeleteIncomingEdges(ContractorThreadData *data, GraphT &graph, const NodeID node)
 {
     std::vector<NodeID> &neighbours = data->neighbours;
     neighbours.clear();
@@ -460,9 +466,10 @@ void DeleteIncomingEdges(ContractorThreadData *data, ContractorGraph &graph, con
     }
 }
 
+template<typename GraphT>
 bool UpdateNodeNeighbours(ContractorNodeData &node_data,
                           ContractorThreadData *data,
-                          const ContractorGraph &graph,
+                          const GraphT &graph,
                           const NodeID node)
 {
     std::vector<NodeID> &neighbours = data->neighbours;
@@ -495,9 +502,10 @@ bool UpdateNodeNeighbours(ContractorNodeData &node_data,
     return true;
 }
 
+template<typename GraphT>
 bool IsNodeIndependent(const util::XORFastHash<> &hash,
                        const std::vector<float> &priorities,
-                       const ContractorGraph &graph,
+                       const GraphT &graph,
                        ContractorThreadData *const data,
                        const NodeID node)
 {
@@ -561,7 +569,8 @@ bool IsNodeIndependent(const util::XORFastHash<> &hash,
 }
 }
 
-LevelAndCore contractGraph(ContractorGraph &graph,
+template<typename GraphT>
+LevelAndCore contractGraph(GraphT &graph,
                            std::vector<bool> node_is_contractable_,
                            std::vector<float> cached_node_levels_,
                            std::vector<EdgeWeight> node_weights_,
@@ -725,7 +734,7 @@ LevelAndCore contractGraph(ContractorGraph &graph,
                 const EdgeID current_edge_ID = graph.FindEdge(edge.source, edge.target);
                 if (current_edge_ID != SPECIAL_EDGEID)
                 {
-                    ContractorGraph::EdgeData &current_data = graph.GetEdgeData(current_edge_ID);
+                    auto &current_data = graph.GetEdgeData(current_edge_ID);
                     if (current_data.shortcut && edge.data.forward == current_data.forward &&
                         edge.data.backward == current_data.backward)
                     {
@@ -773,6 +782,18 @@ LevelAndCore contractGraph(ContractorGraph &graph,
 
     return LevelAndCore {std::move(node_data.levels), std::move(node_data.is_core)};
 }
+
+template LevelAndCore contractGraph(util::FilteredGraphContainer<ContractorGraph> &graph,
+                           std::vector<bool> node_is_contractable_,
+                           std::vector<float> cached_node_levels_,
+                           std::vector<EdgeWeight> node_weights_,
+                           double core_factor);
+
+template LevelAndCore contractGraph(ContractorGraph &graph,
+                           std::vector<bool> node_is_contractable_,
+                           std::vector<float> cached_node_levels_,
+                           std::vector<EdgeWeight> node_weights_,
+                           double core_factor);
 
 } // namespace contractor
 } // namespace osrm

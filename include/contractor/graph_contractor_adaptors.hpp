@@ -124,7 +124,7 @@ ContractorGraph toContractorGraph(NodeID number_of_nodes, InputEdgeContainer inp
     return ContractorGraph{number_of_nodes, edges};
 }
 
-template <class Edge> inline util::DeallocatingVector<Edge> toEdges(ContractorGraph graph)
+template <class Edge, typename GraphT> inline util::DeallocatingVector<Edge> toEdges(GraphT graph)
 {
     util::DeallocatingVector<Edge> edges;
 

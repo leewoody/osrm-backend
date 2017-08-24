@@ -159,9 +159,8 @@ class FilteredGraphImpl<util::DynamicGraph<EdgeDataT>, storage::Ownership::Conta
     struct EdgeDataWithFilter
     {
         EdgeDataWithFilter() = default;
-        EdgeDataWithFilter(const EdgeDataT &data) : data(data), filter(false) {}
-
-        EdgeDataWithFilter(EdgeDataT &&data) : data(std::move(data)), filter(false) {}
+        EdgeDataWithFilter(const EdgeDataT &data) : data(data), filter(true) {}
+        EdgeDataWithFilter(EdgeDataT &&data) : data(std::move(data)), filter(true) {}
 
         EdgeDataT data;
         bool filter : 1;
@@ -179,19 +178,19 @@ class FilteredGraphImpl<util::DynamicGraph<EdgeDataT>, storage::Ownership::Conta
 
     inline NodeIterator GetTarget(const EdgeIterator e) const
     {
-        BOOST_ASSERT(edge_filter[e]);
+        BOOST_ASSERT(graph.GetEdgeData(e).filter);
         return graph.GetTarget(e);
     }
 
     auto &GetEdgeData(const EdgeIterator e)
     {
-        BOOST_ASSERT(edge_filter[e]);
+        BOOST_ASSERT(graph.GetEdgeData(e).filter);
         return graph.GetEdgeData(e).data;
     }
 
     const auto &GetEdgeData(const EdgeIterator e) const
     {
-        BOOST_ASSERT(edge_filter[e]);
+        BOOST_ASSERT(graph.GetEdgeData(e).filter);
         return graph.GetEdgeData(e).data;
     }
 
@@ -199,7 +198,7 @@ class FilteredGraphImpl<util::DynamicGraph<EdgeDataT>, storage::Ownership::Conta
     {
         return graph.GetAdjacentEdgeRange(n) |
                boost::adaptors::filtered(
-                   [this](const EdgeIterator edge) { return GetEdgeData(edge).filter; });
+                   [this](const EdgeIterator edge) { return graph.GetEdgeData(edge).filter; });
     }
 
     // searches for a specific edge
@@ -207,7 +206,7 @@ class FilteredGraphImpl<util::DynamicGraph<EdgeDataT>, storage::Ownership::Conta
     {
         for (const auto edge : GetAdjacentEdgeRange(from))
         {
-            if (to == GetTarge(edge))
+            if (to == GetTarget(edge))
             {
                 return edge;
             }
@@ -257,6 +256,21 @@ class FilteredGraphImpl<util::DynamicGraph<EdgeDataT>, storage::Ownership::Conta
             }
         }
         return current_iterator;
+    }
+
+    auto InsertEdge(const NodeIterator from, const NodeIterator to, const EdgeDataT &data)
+    {
+        return graph.InsertEdge(from, to, EdgeDataWithFilter{data});
+    }
+
+    auto DeleteEdgesTo(const NodeIterator from, const NodeIterator to)
+    {
+        return graph.DeleteEdgesTo(from, to);
+    }
+
+    void DeleteEdge(const NodeIterator source, const EdgeIterator e)
+    {
+        graph.DeleteEdge(source, e);
     }
 
     template <typename Pred>

@@ -3,6 +3,7 @@
 #include "contractor/files.hpp"
 #include "contractor/graph_contractor.hpp"
 #include "contractor/graph_contractor_adaptors.hpp"
+#include "contractor/contracted_edge_container.hpp"
 
 #include "extractor/compressed_edge_container.hpp"
 #include "extractor/edge_based_graph_factory.hpp"
@@ -15,6 +16,8 @@
 
 #include "util/exception.hpp"
 #include "util/exception_utils.hpp"
+#include "util/exclude_flag.hpp"
+#include "util/filtered_graph.hpp"
 #include "util/graph_loader.hpp"
 #include "util/integer_range.hpp"
 #include "util/log.hpp"
@@ -22,8 +25,6 @@
 #include "util/string_util.hpp"
 #include "util/timing_util.hpp"
 #include "util/typedefs.hpp"
-#include "util/exclude_flag.hpp"
-#include "util/filtered_graph.hpp"
 
 #include <algorithm>
 #include <bitset>
@@ -81,7 +82,7 @@ int Contractor::Run()
         extractor::ProfileProperties properties;
         extractor::files::readProfileProperties(config.GetPath(".osrm.properties"), properties);
 
-        filters = util::excludeFlagsToNodeFilter(max_edge_id+1, node_data, properties);
+        filters = util::excludeFlagsToNodeFilter(max_edge_id + 1, node_data, properties);
     }
 
     util::DeallocatingVector<QueryEdge> contracted_edge_list;
@@ -90,7 +91,7 @@ int Contractor::Run()
         std::vector<bool> always_allowed(max_edge_id + 1, true);
         for (const auto &filter : filters)
         {
-            for (const auto node : util::irange<NodeID>(0, max_edge_id+1))
+            for (const auto node : util::irange<NodeID>(0, max_edge_id + 1))
             {
                 always_allowed[node] = always_allowed[node] && filter[node];
             }
@@ -101,29 +102,23 @@ int Contractor::Run()
         // but increases the final CH quality and contraction speed.
         constexpr float BASE_CORE = 0.9;
         std::vector<bool> shared_core;
-        std::tie(std::ignore, shared_core) = contractGraph(contractor_graph,
-                                                           std::move(always_allowed),
-                                                           node_levels,
-                                                           node_weights,
-                                                           BASE_CORE);
+        std::tie(std::ignore, shared_core) = contractGraph(
+            contractor_graph, std::move(always_allowed), node_levels, node_weights, BASE_CORE);
 
+        ContractedEdgeContainer edge_container;
         for (const auto &filter : filters)
         {
-            util::FilteredGraphContainer<ContractorGraph> filtered_graph {contractor_graph, [&filter](const NodeID node) {
-                return filter[node];
-            }};
+            util::FilteredGraphContainer<ContractorGraph> filtered_graph{
+                contractor_graph, [&filter](const NodeID node) { return filter[node]; }};
 
-            // FIXME we need a specialization for this
-            //contractGraph(filtered_graph,
-            //              shared_core,
-            //              node_levels,
-            //              node_weights,
-            //              config.core_factor);
+            contractGraph(
+                filtered_graph, shared_core, node_levels, node_weights, config.core_factor);
+
+            edge_container.Merge(toEdges<QueryEdge>(std::move(filtered_graph)));
         }
+        contracted_edge_list = std::move(edge_container.edges);
 
-        util::Log() << "Contracted graph has " << contractor_graph.GetNumberOfEdges() << " edges.";
-
-        contracted_edge_list = toEdges<QueryEdge>(std::move(contractor_graph));
+        util::Log() << "Contracted graph has " << contracted_edge_list.size() << " edges.";
     }
     TIMER_STOP(contraction);
 

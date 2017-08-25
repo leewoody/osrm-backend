@@ -35,25 +35,23 @@ void write(storage::io::FileWriter &writer, const DynamicGraph<EdgeDataT> &graph
 
 namespace detail
 {
-    // These types need to live outside of DynamicGraph
-    // to be not dependable. We need this for transforming graphs
-    // with different data.
+// These types need to live outside of DynamicGraph
+// to be not dependable. We need this for transforming graphs
+// with different data.
 
-    template<typename EdgeIterator>
-    struct DynamicNode
-    {
-        // index of the first edge
-        EdgeIterator first_edge;
-        // amount of edges
-        unsigned edges;
-    };
+template <typename EdgeIterator> struct DynamicNode
+{
+    // index of the first edge
+    EdgeIterator first_edge;
+    // amount of edges
+    unsigned edges;
+};
 
-    template<typename NodeIterator, typename EdgeDataT>
-    struct DynamicEdge
-    {
-        NodeIterator target;
-        EdgeDataT data;
-    };
+template <typename NodeIterator, typename EdgeDataT> struct DynamicEdge
+{
+    NodeIterator target;
+    EdgeDataT data;
+};
 }
 
 template <typename EdgeDataT> class DynamicGraph
@@ -67,7 +65,7 @@ template <typename EdgeDataT> class DynamicGraph
     using Node = detail::DynamicNode<EdgeIterator>;
     using Edge = detail::DynamicEdge<NodeIterator, EdgeDataT>;
 
-    template<typename E> friend class DynamicGraph;
+    template <typename E> friend class DynamicGraph;
 
     class InputEdge
     {
@@ -190,43 +188,37 @@ template <typename EdgeDataT> class DynamicGraph
         return *this;
     }
 
-    template <typename OtherEdgeDataT>
-    auto Transform() const &
+    // Removes all edges to and from nodes for which filter(node_id) returns false
+    template <typename Pred> auto Filter(Pred filter) const &
     {
-        DynamicGraph<OtherEdgeDataT> other;
+        DynamicGraph other;
 
         other.number_of_nodes = number_of_nodes;
         other.number_of_edges = static_cast<std::uint32_t>(number_of_edges);
-        other.node_array = node_array;
-        other.edge_list.resize(edge_list.size());
-        std::transform(edge_list.begin(),
-                       edge_list.end(),
-                       other.edge_list.begin(),
-                       [](const auto &edge_entry) {
-                           return detail::DynamicEdge<NodeIterator, OtherEdgeDataT>{edge_entry.target, OtherEdgeDataT{edge_entry.data}};
-                       });
+        other.edge_list.reserve(edge_list.size());
+        other.node_array.resize(node_array.size());
+
+        NodeID node_id = 0;
+        std::transform(
+            node_array.begin(), node_array.end(), other.node_array.begin(), [&](const Node &node) {
+                const EdgeIterator first_edge = other.edge_list.size();
+                if (filter(node_id++))
+                {
+                    std::copy_if(edge_list.begin() + node.first_edge,
+                                 edge_list.begin() + node.first_edge + node.edges,
+                                 std::back_inserter(other.edge_list),
+                                 [&](const auto &edge) { return filter(edge.target); });
+                    const unsigned num_edges = other.edge_list.size() - first_edge;
+                    return Node{first_edge, num_edges};
+                }
+                else
+                {
+                    return Node{first_edge, 0};
+                }
+            });
 
         return other;
     }
-
-    template <typename OtherEdgeDataT>
-    auto Transform() &&
-    {
-        DynamicGraph<OtherEdgeDataT> other;
-        other.number_of_nodes = number_of_nodes;
-        other.number_of_edges = static_cast<std::uint32_t>(number_of_edges);
-        other.node_array = std::move(node_array);
-        other.edge_list.resize(edge_list.size());
-        std::transform(std::make_move_iterator(edge_list.begin()),
-                       std::make_move_iterator(edge_list.end()),
-                       other.edge_list.begin(),
-                       [](auto &&edge_entry) {
-                           return detail::DynamicEdge<NodeIterator, OtherEdgeDataT>{edge_entry.target, OtherEdgeDataT{std::move(edge_entry.data)}};
-                       });
-
-        return other;
-    }
-
 
     unsigned GetNumberOfNodes() const { return number_of_nodes; }
 

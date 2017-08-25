@@ -15,16 +15,14 @@ namespace contractor
 
 using LevelAndCore = std::tuple<std::vector<float>, std::vector<bool>>;
 
-template <typename GraphT>
-LevelAndCore contractGraph(GraphT &graph,
+LevelAndCore contractGraph(ContractorGraph &graph,
                            std::vector<bool> node_is_contractable,
                            std::vector<float> cached_node_levels,
                            std::vector<EdgeWeight> node_weights,
                            double core_factor = 1.0);
 
 // Overload for contracting all nodes
-template <typename GraphT>
-inline LevelAndCore contractGraph(GraphT &graph,
+inline LevelAndCore contractGraph(ContractorGraph &graph,
                                   std::vector<float> cached_node_levels,
                                   std::vector<EdgeWeight> node_weights,
                                   double core_factor = 1.0)
@@ -34,9 +32,8 @@ inline LevelAndCore contractGraph(GraphT &graph,
 }
 
 // Overload for contracting withcout cache
-template <typename GraphT>
 inline LevelAndCore
-contractGraph(GraphT &graph, std::vector<EdgeWeight> node_weights, double core_factor = 1.0)
+contractGraph(ContractorGraph &graph, std::vector<EdgeWeight> node_weights, double core_factor = 1.0)
 {
     return contractGraph(graph, {}, {}, std::move(node_weights), core_factor);
 }

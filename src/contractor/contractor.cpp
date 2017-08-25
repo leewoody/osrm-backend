@@ -1,9 +1,9 @@
 #include "contractor/contractor.hpp"
+#include "contractor/contracted_edge_container.hpp"
 #include "contractor/crc32_processor.hpp"
 #include "contractor/files.hpp"
 #include "contractor/graph_contractor.hpp"
 #include "contractor/graph_contractor_adaptors.hpp"
-#include "contractor/contracted_edge_container.hpp"
 
 #include "extractor/compressed_edge_container.hpp"
 #include "extractor/edge_based_graph_factory.hpp"
@@ -85,8 +85,9 @@ int Contractor::Run()
         filters = util::excludeFlagsToNodeFilter(max_edge_id + 1, node_data, properties);
     }
 
-    util::DeallocatingVector<QueryEdge> contracted_edge_list;
-    { // own scope to not keep the contractor around
+    ContractedEdgeContainer edge_container;
+    ContractorGraph shared_core_graph;
+    {
         auto contractor_graph = toContractorGraph(max_edge_id + 1, std::move(edge_based_edge_list));
         std::vector<bool> always_allowed(max_edge_id + 1, true);
         for (const auto &filter : filters)
@@ -101,36 +102,48 @@ int Contractor::Run()
         // a very dense core. This increases the overall graph sizes a little bit
         // but increases the final CH quality and contraction speed.
         constexpr float BASE_CORE = 0.9;
-        std::vector<bool> shared_core;
-        std::tie(std::ignore, shared_core) = contractGraph(
-            contractor_graph, std::move(always_allowed), node_levels, node_weights, BASE_CORE);
+        std::vector<bool> is_shared_core;
+        std::tie(std::ignore, is_shared_core) = contractGraph(
+            contractor_graph, std::move(always_allowed), node_levels, node_weights, std::min<float>(BASE_CORE, config.core_factor));
 
-        ContractedEdgeContainer edge_container;
+        // Add all non-core edges to container
+        {
+            auto non_core_edges = toEdges<QueryEdge>(contractor_graph);
+            auto new_end = std::remove_if(non_core_edges.begin(), non_core_edges.end(), [&](const auto& edge) {
+                        return is_shared_core[edge.source] && is_shared_core[edge.target];
+                    });
+            non_core_edges.resize(new_end - non_core_edges.begin());
+            edge_container.Merge(std::move(non_core_edges));
+        }
+
+        // Extract core graph for further contraction
+        shared_core_graph = contractor_graph.Filter(
+            [&is_shared_core](const NodeID node) { return is_shared_core[node]; });
+    }
+
+    {
         for (const auto &filter : filters)
         {
-            util::FilteredGraphContainer<ContractorGraph> filtered_graph{
-                contractor_graph, [&filter](const NodeID node) { return filter[node]; }};
+            auto filtered_core_graph =
+                shared_core_graph.Filter([&filter](const NodeID node) { return filter[node]; });
+            contractGraph(filtered_core_graph, node_levels, node_weights, config.core_factor);
 
-            contractGraph(
-                filtered_graph, shared_core, node_levels, node_weights, config.core_factor);
-
-            edge_container.Merge(toEdges<QueryEdge>(std::move(filtered_graph)));
+            edge_container.Merge(toEdges<QueryEdge>(std::move(filtered_core_graph)));
         }
-        contracted_edge_list = std::move(edge_container.edges);
-
-        util::Log() << "Contracted graph has " << contracted_edge_list.size() << " edges.";
     }
-    TIMER_STOP(contraction);
 
+    util::Log() << "Contracted graph has " << edge_container.edges.size() << " edges.";
+
+    TIMER_STOP(contraction);
     util::Log() << "Contraction took " << TIMER_SEC(contraction) << " sec";
 
     {
         RangebasedCRC32 crc32_calculator;
-        const unsigned checksum = crc32_calculator(contracted_edge_list);
+        const unsigned checksum = crc32_calculator(edge_container.edges);
 
         files::writeGraph(config.GetPath(".osrm.hsgr"),
                           checksum,
-                          QueryGraph{max_edge_id + 1, std::move(contracted_edge_list)});
+                          QueryGraph{max_edge_id + 1, std::move(edge_container.edges)});
     }
 
     files::writeCoreMarker(config.GetPath(".osrm.core"), is_core_node);
